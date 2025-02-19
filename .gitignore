@@ -1,5 +1,7 @@
 objs/
 
 *.o
+*.spv
+
 main
 builder

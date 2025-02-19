@@ -10,5 +10,8 @@ void main()
 {
     payload.position = vec3(0.0);
     payload.normal = vec3(0.0);
+    
     payload.color = vec4(vec3(0.18), 0.0);
+
+    payload.material = 0;
 }

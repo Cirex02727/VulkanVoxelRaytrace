@@ -8,11 +8,11 @@
 
 // #extension GL_EXT_debug_printf : require
 
+#include "rayShared.shinc"
+
 hitAttributeEXT vec3 hitNormal;
 
 layout(set = 1, binding = 4, r8ui) uniform uimage3D volumes[];
-
-#define EPSILON 5e-4
 
 bool aabbIntersect(in vec3 rayO, in vec3 rayInvD, in vec3 aabbMax, out float t)
 {
@@ -72,7 +72,7 @@ void main()
 		uint data = imageLoad(volumes[gl_InstanceCustomIndexEXT], voxel).r;
 		if(data != 0u)
         {
-            hitNormal = norm;
+            hitNormal = -norm;
             reportIntersectionEXT(max(t, 0.01), data);
             return;
         }

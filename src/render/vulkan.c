@@ -150,6 +150,7 @@ static VkExtent2D swapChainExtent;
 static Images swapChainImages = {0};
 
 static Images viewportImages = {0};
+static Images accumulateViewportImages = {0};
 
 static VkRenderPass renderPass;
 
@@ -865,7 +866,10 @@ static bool vulkan_create_image_views()
 static bool vulkan_create_viewport_image(VkCommandPool commandPool)
 {
     list_alloc(viewportImages, swapChainImages.count);
-    viewportImages.count = swapChainImages.count;
+    list_alloc(accumulateViewportImages, swapChainImages.count);
+
+    viewportImages.count           = swapChainImages.count;
+    accumulateViewportImages.count = swapChainImages.count;
 
     for (uint32_t i = 0; i < swapChainImages.count; i++)
     {
@@ -907,14 +911,59 @@ static bool vulkan_create_viewport_image(VkCommandPool commandPool)
         
         CHECK(vulkan_end_single_time_commands(commandPool, commandBuffer));
     }
+
+    for (uint32_t i = 0; i < swapChainImages.count; i++)
+    {
+        CHECK(vulkan_create_image(swapChainExtent.width, swapChainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT,
+            VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &accumulateViewportImages.items[i]));
+
+        VkCommandBuffer commandBuffer;
+        CHECK(vulkan_begin_single_time_commands(commandPool, &commandBuffer));
+
+        VkImageMemoryBarrier barrier = {
+            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask       = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask       = VK_ACCESS_MEMORY_READ_BIT,
+            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image               = accumulateViewportImages.items[i].image,
+            .subresourceRange    = {
+                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel   = 0,
+                .levelCount     = 1,
+                .baseArrayLayer = 0,
+                .layerCount     = 1
+            }
+        };
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, NULL,
+            0, NULL,
+            1, &barrier);
+        
+        CHECK(vulkan_end_single_time_commands(commandPool, commandBuffer));
+    }
     return true;
 }
 
 static bool vulkan_create_viewport_image_views()
 {
     for (size_t i = 0; i < viewportImages.count; i++)
-        vulkan_create_image_view(viewportImages.items[i].image, swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1,
+        vulkan_create_image_view(viewportImages.items[i].image, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1,
             &viewportImages.items[i].view);
+
+    for (size_t i = 0; i < accumulateViewportImages.count; i++)
+        vulkan_create_image_view(accumulateViewportImages.items[i].image, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1,
+            &accumulateViewportImages.items[i].view);
     
     return true;
 }
@@ -1335,6 +1384,9 @@ static bool vulkan_create_raytracing()
     {
         timer_start(&t);
 
+        raytracing_add_material(&(Material) { .emission = { 0.0f, 0.0f, 0.0f, 0.0f } });
+        raytracing_add_material(&(Material) { .emission = { 1.0f, 0.0f, 0.0f, 5.0f } });
+
         Texture volume = {
             .mipLevels = 1,
         };
@@ -1361,7 +1413,7 @@ static bool vulkan_create_raytracing()
                         int i = x + y * width + z * (width * height);
 
                         bool border = (x < 10 && y < 10 && z < 10) || (x > width - 10 && y > height - 10 && z > depth - 10);
-                        volumeData[i] = border ? (i % 7) + 1 : 0;
+                        volumeData[i] = border ? (i == 0 ? 7 : ((i % 6) + 1)) : 0;
                     }
 
             CHECK(vulkan_upload_texture_buffer_3d(volumeData, width, height, depth, commandPool, &volume));
@@ -1370,7 +1422,7 @@ static bool vulkan_create_raytracing()
         }
 
         raytracing_add_triangle_geometry(vertexBuffer.buffer, indexBuffer.buffer,
-            ARRAYLEN(vertices), sizeof(Vertex), ARRAYLEN(indices));
+            ARRAYLEN(vertices), sizeof(Vertex), ARRAYLEN(indices), 0);
 
         timer_stop(&t);
         time_to_str(tempStr, timer_get_ns(&t));
@@ -1447,7 +1499,7 @@ static bool vulkan_create_raytracing()
         log_trace("Raytracing building top layer in %s", tempStr);
     }
 
-    CHECK(raytracing_create_descriptors(viewportImages, &texture));
+    CHECK(raytracing_create_descriptors(viewportImages, accumulateViewportImages, &texture));
     CHECK(raytracing_create_pipeline(globalUBODescriptorSetLayout));
     CHECK(raytracing_create_shader_binding_table());
     return true;
@@ -1532,6 +1584,9 @@ static void vulkan_cleanup_swap_chain()
 {
     for(size_t i = 0; i < viewportImages.count; ++i)
         DeleteImage(viewportImages.items[i]);
+
+    for(size_t i = 0; i < accumulateViewportImages.count; ++i)
+        DeleteImage(accumulateViewportImages.items[i]);
     
     DeleteImage(color);
     DeleteImage(depth);
@@ -1713,8 +1768,8 @@ static bool vulkan_record_command_buffer(VkCommandBuffer commandBuffer, uint32_t
             0, NULL,
             1, &barrier);
 
-        raytracer_render(commandBuffer, currentFrame, swapChainExtent.width, swapChainExtent.height,
-            globalUBODescriptorSets.items[currentFrame]);
+        raytracer_render(commandBuffer, accumulateViewportImages.items[currentFrame].image, currentFrame,
+            swapChainExtent.width, swapChainExtent.height, globalUBODescriptorSets.items[currentFrame]);
         
         // Viewport image to Transfer Src
         barrier = (VkImageMemoryBarrier) {

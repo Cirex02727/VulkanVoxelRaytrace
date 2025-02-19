@@ -1,6 +1,7 @@
 #include "raytracing.h"
 
 #include "core/filesystem.h"
+#include "core/camera.h"
 #include "core/list.h"
 
 #include "shader.h"
@@ -31,11 +32,9 @@ typedef struct {
 typedef struct {
     VkDeviceAddress vertexAddress;
     VkDeviceAddress indexAddress;
-} GeometryAddresses;
 
-typedef struct {
-    VkDeviceAddress address;
-} AABBAddresses;
+    uint32_t material;
+} GeometryData;
 
 typedef struct {
     VkAccelerationStructureGeometryKHR geometry;
@@ -56,11 +55,10 @@ typedef struct {
 } BottomLevel;
 
 typedef struct {
-    uint32_t material;
-} AABBData;
+    float frameCount;
+} PushConstants;
 
-LIST_DEFINE(GeometryAddresses, GeometriesAddresses);
-LIST_DEFINE(AABBAddresses, AABBsAddresses);
+LIST_DEFINE(GeometryData, GeometriesAddresses);
 LIST_DEFINE(BlasInput, BlasInputs);
 LIST_DEFINE(BottomLevel, BottomLevels);
 LIST_DEFINE(VkAccelerationStructureInstanceKHR, Tlas);
@@ -68,7 +66,6 @@ LIST_DEFINE(AddressedBuffer, AddressedBuffers);
 LIST_DEFINE(BuildAccelerationStructure, BuildAccelerationStructures);
 
 LIST_DEFINE(Material, Materials);
-LIST_DEFINE(AABBData, AABBDatas);
 
 static PFN_vkGetBufferDeviceAddressKHR                   GetBufferDeviceAddressKHR                   = NULL;
 static PFN_vkCreateAccelerationStructureKHR              CreateAccelerationStructureKHR              = NULL;
@@ -88,15 +85,10 @@ static AddressedBuffers blasAddresses = {0};
 static GeometriesAddresses geometriesAddresses = {0};
 static BufferData          geometriesAddressesBuffer;
 
-static AABBsAddresses aabbsAddresses = {0};
-static BufferData     aabbsAddressesBuffer;
-
-static AABBDatas  aabbDatas = {0};
-static BufferData aabbDatasBuffer;
-
 static Images volumes = {0};
 
-static Materials materials = {0};
+static Materials  materials = {0};
+static BufferData materialsBuffer;
 
 static Tlas                       tlas = {0};
 static VkAccelerationStructureKHR tlasAs;
@@ -119,6 +111,8 @@ static VkStridedDeviceAddressRegionKHR rayMissRegion;
 static VkStridedDeviceAddressRegionKHR rayHitRegion;
 static VkStridedDeviceAddressRegionKHR rayCallRegion;
 static BufferData raySBTBuffer;
+
+static PushConstants pushConstants = {0};
 
 static VkDeviceAddress raytracing_get_buffer_device_address(VkBuffer buffer)
 {
@@ -175,17 +169,12 @@ void raytracing_add_volume_geometry(VkBuffer aabbBuffer, uint64_t stride, Image 
         .structureFlags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR,
     };
     list_append(blasInputs, blasInput);
-
-    AABBAddresses addresses = {
-        .address = address,
-    };
-    list_append(aabbsAddresses, addresses);
-
+    
     list_append(volumes, volume);
 }
 
 void raytracing_add_triangle_geometry(VkBuffer vertexBuffer, VkBuffer indexBuffer,
-    uint32_t vertexCount, uint64_t vertexStride, uint32_t indexCount)
+    uint32_t vertexCount, uint64_t vertexStride, uint32_t indexCount, uint32_t material)
 {
     ASSERT(vertexCount > 0 && vertexStride > 0 && indexCount > 0);
 
@@ -223,16 +212,20 @@ void raytracing_add_triangle_geometry(VkBuffer vertexBuffer, VkBuffer indexBuffe
     };
     list_append(blasInputs, blasInput);
 
-    GeometryAddresses addresses = {
+    GeometryData addresses = {
         .vertexAddress = vertexAddress,
         .indexAddress  = indexAddress,
+
+        .material = material,
     };
     list_append(geometriesAddresses, addresses);
 }
 
-void raytracing_add_material(Material* material)
+size_t raytracing_add_material(Material* material)
 {
-    
+    size_t i = materials.count;
+    list_append(materials, *material);
+    return i;
 }
 
 VkAccelerationStructureInstanceKHR* raytracing_add_volume_instance(uint32_t objIndex, VkTransformMatrixKHR* transform)
@@ -268,13 +261,13 @@ void raytracing_update_instance(VkTransformMatrixKHR* transform, uint32_t instan
 
 bool raytracing_create_geometries_address_buffer(VkCommandPool commandPool)
 {
-    CHECK(vulkan_create_data_buffer(commandPool, geometriesAddresses.items, geometriesAddresses.count * sizeof(GeometryAddresses),
+    CHECK(vulkan_create_data_buffer(commandPool, geometriesAddresses.items, geometriesAddresses.count * sizeof(GeometryData),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0,
         &geometriesAddressesBuffer.buffer, &geometriesAddressesBuffer.memory));
-
-    CHECK(vulkan_create_data_buffer(commandPool, aabbsAddresses.items, aabbsAddresses.count * sizeof(AABBsAddresses),
+    
+    CHECK(vulkan_create_data_buffer(commandPool, materials.items, materials.count * sizeof(Material),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0,
-        &aabbsAddressesBuffer.buffer, &aabbsAddressesBuffer.memory));
+        &materialsBuffer.buffer, &materialsBuffer.memory));
     return true;
 }
 
@@ -638,11 +631,26 @@ static bool raytracing_create_descriptor_set_layouts()
         .binding            = 4,
         .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         .descriptorCount    = volumes.count,
-        .stageFlags         = VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+        .stageFlags         = VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
+    };
+    
+    VkDescriptorSetLayoutBinding materialsLayoutBinding = {
+        .binding            = 5,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+    };
+
+    VkDescriptorSetLayoutBinding accumulateLayoutBinding = {
+        .binding            = 6,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
     };
 
     VkDescriptorSetLayoutBinding bindings[] = {
-        asLayoutBinding, samplerLayoutBinding, objsLayoutBinding, texturesLayoutBinding, volumesLayoutBinding };
+        asLayoutBinding, samplerLayoutBinding, objsLayoutBinding, texturesLayoutBinding,
+        volumesLayoutBinding, materialsLayoutBinding, accumulateLayoutBinding };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo = {
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -655,11 +663,10 @@ static bool raytracing_create_descriptor_set_layouts()
     return true;
 }
 
-static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
+static bool raytracing_update_descriptor_sets(Images images, Images accumulateImages, Texture* texture)
 {
     VkWriteDescriptorSetAccelerationStructureKHR accelerationStructureInfo = {
         .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-        .pNext                      = NULL,
         .accelerationStructureCount = 1,
         .pAccelerationStructures    = &tlasAs,
     };
@@ -667,7 +674,7 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
     VkDescriptorBufferInfo objsInfo = {
         .buffer = geometriesAddressesBuffer.buffer,
         .offset = 0,
-        .range  = geometriesAddresses.count * sizeof(GeometryAddresses),
+        .range  = geometriesAddresses.count * sizeof(GeometryData),
     };
 
     VkDescriptorImageInfo textureInfo = {
@@ -688,12 +695,24 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
         };
         list_append(volumesInfos, info);
     }
+    
+    VkDescriptorBufferInfo materialsInfo = {
+        .buffer = materialsBuffer.buffer,
+        .offset = 0,
+        .range  = materials.count * sizeof(Material),
+    };
 
     for (size_t i = 0; i < images.count; ++i)
     {
         VkDescriptorImageInfo imageInfo = {
             .sampler     = NULL,
             .imageView   = images.items[i].view,
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+        };
+
+        VkDescriptorImageInfo accumulateImageInfo = {
+            .sampler     = NULL,
+            .imageView   = accumulateImages.items[i].view,
             .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
         };
 
@@ -709,7 +728,6 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
             },
             (VkWriteDescriptorSet) {
                 .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .pNext            = NULL,
                 .dstSet           = descriptorSets.items[i],
                 .dstBinding       = 1,
                 .dstArrayElement  = 0,
@@ -719,7 +737,6 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
             },
             (VkWriteDescriptorSet) {
                 .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .pNext            = NULL,
                 .dstSet           = descriptorSets.items[i],
                 .dstBinding       = 2,
                 .dstArrayElement  = 0,
@@ -729,7 +746,6 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
             },
             (VkWriteDescriptorSet) {
                 .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .pNext            = NULL,
                 .dstSet           = descriptorSets.items[i],
                 .dstBinding       = 3,
                 .dstArrayElement  = 0,
@@ -739,13 +755,30 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
             },
             (VkWriteDescriptorSet) {
                 .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .pNext            = NULL,
                 .dstSet           = descriptorSets.items[i],
                 .dstBinding       = 4,
                 .dstArrayElement  = 0,
                 .descriptorCount  = volumesInfos.count,
                 .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 .pImageInfo       = volumesInfos.items,
+            },
+            (VkWriteDescriptorSet) {
+                .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet           = descriptorSets.items[i],
+                .dstBinding       = 5,
+                .dstArrayElement  = 0,
+                .descriptorCount  = 1,
+                .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo      = &materialsInfo,
+            },
+            (VkWriteDescriptorSet) {
+                .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet           = descriptorSets.items[i],
+                .dstBinding       = 6,
+                .dstArrayElement  = 0,
+                .descriptorCount  = 1,
+                .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                .pImageInfo       = &accumulateImageInfo,
             },
         };
 
@@ -754,7 +787,7 @@ static bool raytracing_update_descriptor_sets(Images images, Texture* texture)
     return true;
 }
 
-bool raytracing_create_descriptors(Images images, Texture* texture)
+bool raytracing_create_descriptors(Images images, Images accumulateImages, Texture* texture)
 {
     CHECK(raytracing_create_descriptor_set_layouts());
 
@@ -773,6 +806,14 @@ bool raytracing_create_descriptors(Images images, Texture* texture)
         },
         (VkDescriptorPoolSize) {
             .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = images.count,
+        },
+        (VkDescriptorPoolSize) {
+            .type            = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .descriptorCount = images.count,
+        },
+        (VkDescriptorPoolSize) {
+            .type            = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = images.count,
         },
         (VkDescriptorPoolSize) {
@@ -809,7 +850,7 @@ bool raytracing_create_descriptors(Images images, Texture* texture)
     
     VKCHECK(vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.items));
 
-    CHECK(raytracing_update_descriptor_sets(images, texture));
+    CHECK(raytracing_update_descriptor_sets(images, accumulateImages, texture));
     return true;
 }
 
@@ -833,13 +874,19 @@ bool raytracing_create_pipeline(VkDescriptorSetLayout globalUBODescriptorSetLayo
         descriptorSetLayout,
     };
 
+    VkPushConstantRange pushConstantsRange = {
+        .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+        .offset = 0,
+        .size = sizeof(PushConstants),
+    };
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .flags                  = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT,
         .setLayoutCount         = ARRAYLEN(descriptorSetLayouts),
         .pSetLayouts            = descriptorSetLayouts,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges    = NULL,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges    = &pushConstantsRange,
     };
 
     VKCHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &pipelineLayout));
@@ -1124,8 +1171,8 @@ bool raytracing_create_shader_binding_table()
     return true;
 }
 
-bool raytracer_render(VkCommandBuffer commandBuffer, uint32_t frameIndex, uint32_t screenWidth, uint32_t screenHeight,
-    VkDescriptorSet globalUBODescriptorSet)
+bool raytracer_render(VkCommandBuffer commandBuffer, VkImage accumulationImage, uint32_t frameIndex,
+    uint32_t screenWidth, uint32_t screenHeight, VkDescriptorSet globalUBODescriptorSet)
 {
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipeline);
 
@@ -1133,6 +1180,31 @@ bool raytracer_render(VkCommandBuffer commandBuffer, uint32_t frameIndex, uint32
         0, 1, &globalUBODescriptorSet,           0, 0);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout,
         1, 1, &descriptorSets.items[frameIndex], 0, 0);
+    
+    if(camera_moved())
+    {
+        pushConstants.frameCount = 1;
+
+        VkClearColorValue clearColor = {
+            .float32 = { 0.0f, 0.0f, 0.0f, 1.0f },
+        };
+
+        VkImageSubresourceRange subresourceRange = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        };
+
+        vkCmdClearColorImage(commandBuffer, accumulationImage, VK_IMAGE_LAYOUT_GENERAL,
+            &clearColor, 1, &subresourceRange);
+    }
+    else
+        pushConstants.frameCount++;
+    
+    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+        0, sizeof(PushConstants), &pushConstants);
     
     CmdTraceRaysKHR(commandBuffer, &rayGenRegion, &rayMissRegion, &rayHitRegion, &rayCallRegion,
         screenWidth, screenHeight, 1);
@@ -1156,7 +1228,7 @@ void raytracing_destroy()
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, NULL);
 
     DeleteBuffer(geometriesAddressesBuffer);
-    DeleteBuffer(aabbsAddressesBuffer);
+    DeleteBuffer(materialsBuffer);
 
     // Bottom layer
     for(size_t i = 0; i < blasAddresses.count; ++i)

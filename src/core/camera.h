@@ -19,4 +19,6 @@ void camera_update(float dt);
 
 CameraData* camera_get_data();
 
+bool camera_moved();
+
 #endif // CAMERA_H_

@@ -19,12 +19,6 @@ struct Vertex
     vec2 padding;
 };
 
-struct ObjDescriptor
-{
-    uint64_t vertexAddress;
-    uint64_t indexAddress;
-};
-
 layout(location = 0) rayPayloadInEXT Payload payload;
 layout(location = 1) rayPayloadEXT bool isShadowed;
 
@@ -33,7 +27,7 @@ layout(buffer_reference, scalar) buffer Indices  { int    i[]; };
 
 layout(set = 1, binding = 0) uniform accelerationStructureEXT as;
 
-layout(set = 1, binding = 2, scalar) buffer ObjDescriptors { ObjDescriptor i[]; } objDesc;
+layout(set = 1, binding = 2, scalar) buffer GeometryDatas { GeometryData i[]; } geoDatas;
 layout(set = 1, binding = 3) uniform sampler2D textureSampler;
 
 // TODO: Pass via uniform the amount of aabbs for the objDesc offset [e.g. 1 aabb => gl_InstanceCustomIndexEXT - 1]
@@ -41,9 +35,11 @@ layout(set = 1, binding = 3) uniform sampler2D textureSampler;
 void main()
 {
     // Object data
-    ObjDescriptor objResource = objDesc.i[gl_InstanceCustomIndexEXT - 1];
-    Indices       indices     = Indices(objResource.indexAddress);
-    Vertices      vertices    = Vertices(objResource.vertexAddress);
+    GeometryData geoData  = geoDatas.i[gl_InstanceCustomIndexEXT - 1];
+    Indices      indices  = Indices(geoData.indexAddress);
+    Vertices     vertices = Vertices(geoData.vertexAddress);
+
+    payload.material = geoData.material;
     
     // Indices of the triangle
     // ivec3 ind = indices.i[gl_PrimitiveID * 3];
@@ -57,7 +53,7 @@ void main()
     vec3 normal = normalize(cross(v1.pos.xyz - v0.pos.xyz, v2.pos.xyz - v0.pos.xyz));
     payload.normal = normal;
 
-    vec3 position = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
+    vec3 position = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT + normal * EPSILON;
     payload.position = position;
     
     vec3 lightDir = normalize(vec3(0.0, 0.0, 1.0));
@@ -65,8 +61,6 @@ void main()
     float attenuation = dot(normal, lightDir);
     if(attenuation > 0)
     {
-        vec3 origin = position + normal * 1e-3;
-
         uint flags  = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT;
 
         isShadowed = true;
@@ -76,7 +70,7 @@ void main()
                     0,        // sbtRecordOffset
                     0,        // sbtRecordStride
                     1,        // missIndex
-                    origin,   // ray origin
+                    position, // ray origin
                     0.001,    // ray min range
                     lightDir, // ray direction
                     1000.0,   // ray max range
@@ -96,8 +90,5 @@ void main()
     
     color = color * texture(textureSampler, texCoord) * attenuation;
     
-    // Gamma correction
-    color = pow(color, vec4(vec3(1.0 / 2.2), 1.0));
-
     payload.color = color;
 }

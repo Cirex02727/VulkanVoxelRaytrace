@@ -9,13 +9,15 @@
 
 static Vec3 globalUp = { 0.0f, 1.0f, 0.0f };
 
-static Vec3 cameraPosition = { 2.282906f, 1.666712f, 2.625870f }, cameraDirection = { 0.0f, 0.0f, 0.0f };
-static float cameraYaw = 113.333992f, cameraPitch = 55.334690f;
+static Vec3 cameraPosition = { 0.654155f, -0.299999f, 0.371549f }, cameraDirection = { 0.0f, 0.0f, 0.0f };
+static float cameraYaw = 53.332420f, cameraPitch = 19.666969f;
 
 static Vec3 cameraFront, cameraRight;
 static Mat4 cameraProjView, cameraUiProj;
 
 static CameraData cameraData;
+
+static bool cameraMoved = false;
 
 static void camera_update_vectors()
 {
@@ -99,7 +101,8 @@ void camera_update(float dt)
     if(input_key(GLFW_KEY_LEFT_SHIFT))
         vec3_add(&movement, &scaledUp, &movement);
     
-    if(!vec3_is_zero(&movement) || !vec2_is_zero(&mouse_movement))
+    cameraMoved = !vec3_is_zero(&movement) || !vec2_is_zero(&mouse_movement);
+    if(cameraMoved)
     {
         vec3_add(&cameraPosition, &movement, &cameraPosition);
         camera_calculate_view();
@@ -110,4 +113,9 @@ void camera_update(float dt)
 CameraData* camera_get_data()
 {
     return &cameraData;
+}
+
+bool camera_moved()
+{
+    return cameraMoved;
 }
