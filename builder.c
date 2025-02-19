@@ -6,7 +6,7 @@ int main(int argc, char** argv)
 
     bld_set_verbose(false);
 
-    bool isDebug = true;
+    bool isDebug = false;
 
     Bld_Cmd cmd = {0}, linkCmd = {0};
 

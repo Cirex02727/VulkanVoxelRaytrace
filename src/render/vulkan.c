@@ -138,7 +138,7 @@ typedef struct {
 
 static bool VSync = true;
 
-static VkDebugUtilsMessengerEXT debugMessenger;
+IFDEBUG(static VkDebugUtilsMessengerEXT debugMessenger);
 
 static VkInstance instance;
 static VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -227,6 +227,8 @@ static void vulkan_get_attribute_descriptions(VertexInputAttributeDescriptions* 
     list_append(*vertexInputAttributeDescriptions, attributeDescriptor);
 }
 
+#if defined(VKDEBUG)
+
 static VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -311,6 +313,8 @@ finalize:
     return result;
 }
 
+#endif
+
 void vulkan_get_required_extensions(Extensions* extensions)
 {
     uint32_t glfwExtensionCount = 0;
@@ -327,6 +331,8 @@ void vulkan_get_required_extensions(Extensions* extensions)
     });
 }
 
+#if defined(VKDEBUG)
+
 static void vulkan_destroy_debug_utils_messenger_EXT(
     VkInstance instance,
     VkDebugUtilsMessengerEXT debugMessenger,
@@ -339,6 +345,8 @@ static void vulkan_destroy_debug_utils_messenger_EXT(
     
     func(instance, debugMessenger, pAllocator);
 }
+
+#endif
 
 static bool vulkan_create_instance(const char* title)
 {
@@ -398,6 +406,8 @@ static bool vulkan_create_instance(const char* title)
     return true;
 }
 
+#if defined(VKDEBUG)
+
 static bool vulkan_setup_debug_messenger()
 {
     IFRELEASE({
@@ -410,6 +420,8 @@ static bool vulkan_setup_debug_messenger()
     VKCHECK(vulkan_create_debug_utils_messenger_EXT(instance, &createInfo, NULL, &debugMessenger));
     return true;
 }
+
+#endif
 
 static bool vulkan_create_surface()
 {
@@ -1597,7 +1609,7 @@ static bool vulkan_create_raytracing()
 bool vulkan_init(const char* title)
 {
     CHECK(vulkan_create_instance(title));
-    CHECK(vulkan_setup_debug_messenger());
+    IFDEBUG(CHECK(vulkan_setup_debug_messenger()));
     CHECK(vulkan_create_surface());
     CHECK(vulkan_pick_physical_device());
     CHECK(vulkan_create_logical_device());
