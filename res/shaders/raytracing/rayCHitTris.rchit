@@ -30,12 +30,14 @@ layout(set = 1, binding = 0) uniform accelerationStructureEXT as;
 layout(set = 1, binding = 2, scalar) buffer GeometryDatas { GeometryData i[]; } geoDatas;
 layout(set = 1, binding = 3) uniform sampler2D textureSampler;
 
-// TODO: Pass via uniform the amount of aabbs for the objDesc offset [e.g. 1 aabb => gl_InstanceCustomIndexEXT - 1]
+// TODO: Pass via uniform the amount of aabbs for the objDesc offset [e.g. if n aabbs => gl_InstanceCustomIndexEXT - n]
 
 void main()
 {
+    int aabbs = 5;
+
     // Object data
-    GeometryData geoData  = geoDatas.i[gl_InstanceCustomIndexEXT - 1];
+    GeometryData geoData  = geoDatas.i[gl_InstanceCustomIndexEXT - aabbs];
     Indices      indices  = Indices(geoData.indexAddress);
     Vertices     vertices = Vertices(geoData.vertexAddress);
 
@@ -56,32 +58,32 @@ void main()
     vec3 position = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT + normal * EPSILON;
     payload.position = position;
     
-    vec3 lightDir = normalize(vec3(0.0, 0.0, 1.0));
+    // vec3 lightDir = normalize(vec3(0.0, 0.0, 1.0));
 
-    float attenuation = dot(normal, lightDir);
-    if(attenuation > 0)
-    {
-        uint flags  = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT;
-
-        isShadowed = true;
-        traceRayEXT(as,       // acceleration structure
-                    flags,    // rayFlags
-                    0xFF,     // cullMask
-                    0,        // sbtRecordOffset
-                    0,        // sbtRecordStride
-                    1,        // missIndex
-                    position, // ray origin
-                    0.001,    // ray min range
-                    lightDir, // ray direction
-                    1000.0,   // ray max range
-                    1         // payload (location = 1)
-        );
-
-        if(isShadowed)
-            attenuation = 0.1;
-    }
-    else
-        attenuation = 0.01;
+    float attenuation = 1.0f; // dot(normal, lightDir);
+    // if(attenuation > 0)
+    // {
+    //     uint flags  = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT;
+    //     
+    //     isShadowed = true;
+    //     traceRayEXT(as,       // acceleration structure
+    //                 flags,    // rayFlags
+    //                 0xFF,     // cullMask
+    //                 0,        // sbtRecordOffset
+    //                 0,        // sbtRecordStride
+    //                 1,        // missIndex
+    //                 position, // ray origin
+    //                 0.001,    // ray min range
+    //                 lightDir, // ray direction
+    //                 1000.0,   // ray max range
+    //                 1         // payload (location = 1)
+    //     );
+    //     
+    //     if(isShadowed)
+    //         attenuation = 0.1;
+    // }
+    // else
+    //     attenuation = 0.01;
 
     const vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
     vec2 texCoord = v0.uv * barycentrics.x + v1.uv * barycentrics.y + v2.uv * barycentrics.z;

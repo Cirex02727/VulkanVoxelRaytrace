@@ -68,14 +68,14 @@ void main()
     //     debugPrintfEXT("Uv: %v2f\n", gl_LaunchIDEXT.xy);
     
     int samples = 0, depth = 0;
-    while(samples < 5)
+    while(samples < 1)
     {
         ++samples;
         
         vec3 rayO = ro;
         vec3 rayD = rd;
 
-        while(depth < 5)
+        while(depth < 10)
         {
             ++depth;
 
@@ -94,24 +94,24 @@ void main()
             );
 
             // if(debug)
-            //     debugPrintfEXT("Hitted: %d | %v3f | %v3f\n", depth, payload.normal, light);
+            //     debugPrintfEXT("Hitted: %d | %v3f | %v3f | %v3f\n", depth, payload.color.xyz, contribution, light);
 
             // Miss
             if(all(equal(payload.normal, vec3(0.0))))
             {
                 vec3 skyLight = vec3(0.18, 0.18, 0.18);
-                // light += skyLight * contribution;
+                light += skyLight * contribution;
                 break;
             }
 
             contribution *= payload.color.xyz;
 
             vec4 emission = materials.m[payload.material].emission;
-            light += emission.xyz * emission.w;
+            light += contribution * emission.xyz * emission.w;
 
             rayO = payload.position;
 
-            vec3 rnd = random_unit(seed) * 0.001;
+            vec3 rnd = random_unit(seed) * 0.8;
             rayD = normalize(payload.normal + rnd); // reflect(rd, payload.normal);
         }
     }

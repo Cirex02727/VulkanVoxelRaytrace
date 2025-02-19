@@ -27,6 +27,7 @@ LIST_DEFINE(VkFramebuffer, Framebuffers);
 LIST_DEFINE(VkCommandBuffer, CommandBuffers);
 LIST_DEFINE(VkSemaphore, Semaphores);
 LIST_DEFINE(VkFence, Fences);
+LIST_DEFINE(BufferData, BufferDatas);
 LIST_DEFINE(MappedBufferData, MappedBufferDatas);
 LIST_DEFINE(VkDescriptorSetLayout, DescriptorSetLayouts);
 LIST_DEFINE(VkDescriptorSet, DescriptorSets);

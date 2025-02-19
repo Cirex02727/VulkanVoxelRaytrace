@@ -85,6 +85,7 @@ static AddressedBuffers blasAddresses = {0};
 static GeometriesAddresses geometriesAddresses = {0};
 static BufferData          geometriesAddressesBuffer;
 
+static BufferDatas aabbBuffers = {0};
 static Images volumes = {0};
 
 static Materials  materials = {0};
@@ -114,6 +115,8 @@ static BufferData raySBTBuffer;
 
 static PushConstants pushConstants = {0};
 
+static bool clearAccumulation = false;
+
 static VkDeviceAddress raytracing_get_buffer_device_address(VkBuffer buffer)
 {
     VkBufferDeviceAddressInfo addressInfo =
@@ -139,38 +142,57 @@ bool raytracing_init()
     return true;
 }
 
-void raytracing_add_volume_geometry(VkBuffer aabbBuffer, uint64_t stride, Image volume)
+bool raytracing_add_volume_geometry(VkCommandPool commandPool, uint32_t width, uint32_t height, uint32_t depth, uint8_t* data)
 {
-    VkDeviceAddress address = raytracing_get_buffer_device_address(aabbBuffer);
+    AABB aabb = {
+        .min = { 0.0f, 0.0f, 0.0f },
+        .max = { width, height, depth },
+    };
+    BufferData aabbBuffer;
 
-    VkAccelerationStructureGeometryAabbsDataKHR aabb = {
-        .sType              = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
-        .data.deviceAddress = address,
-        .stride             = stride,
+    CHECK(vulkan_create_data_buffer(commandPool, &aabb, sizeof(AABB),
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, &aabbBuffer.buffer, &aabbBuffer.memory));
+    
+    Texture volume = {
+        .mipLevels = 1,
     };
 
-    VkAccelerationStructureGeometryKHR geometry = {
-        .sType          = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType   = VK_GEOMETRY_TYPE_AABBS_KHR,
-        .geometry.aabbs = aabb,
-        .flags          = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
+    CHECK(vulkan_create_image_3d(width, height, depth, VK_FORMAT_R8_UINT,
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &volume.image));
+    CHECK(vulkan_create_image_view_3d(volume.image.image, VK_FORMAT_R8_UINT, VK_IMAGE_ASPECT_COLOR_BIT, &volume.image.view));
 
-    VkAccelerationStructureBuildRangeInfoKHR rangeInfo = {
-        .primitiveCount  = 1,
-        .primitiveOffset = 0,
-        .firstVertex     = 0,
-        .transformOffset = 0
-    };
+    CHECK(vulkan_upload_texture_buffer_3d(data, width, height, depth, commandPool, &volume));
+
+    VkDeviceAddress address = raytracing_get_buffer_device_address(aabbBuffer.buffer);
 
     BlasInput blasInput = {
-        .geometry = geometry,
-        .rangeInfo = rangeInfo,
+        .geometry = (VkAccelerationStructureGeometryKHR)
+        {
+            .sType          = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+            .geometryType   = VK_GEOMETRY_TYPE_AABBS_KHR,
+            .geometry.aabbs = (VkAccelerationStructureGeometryAabbsDataKHR)
+            {
+                .sType              = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
+                .data.deviceAddress = address,
+                .stride             = sizeof(AABB),
+            },
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
+        },
+        .rangeInfo = (VkAccelerationStructureBuildRangeInfoKHR)
+        {
+            .primitiveCount  = 1,
+            .primitiveOffset = 0,
+            .firstVertex     = 0,
+            .transformOffset = 0,
+        },
         .structureFlags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR,
     };
     list_append(blasInputs, blasInput);
     
+    list_append(aabbBuffers, aabbBuffer);
     list_append(volumes, volume);
+    return true;
 }
 
 void raytracing_add_triangle_geometry(VkBuffer vertexBuffer, VkBuffer indexBuffer,
@@ -663,7 +685,7 @@ static bool raytracing_create_descriptor_set_layouts()
     return true;
 }
 
-static bool raytracing_update_descriptor_sets(Images images, Images accumulateImages, Texture* texture)
+bool raytracing_update_descriptor_sets(Images images, Images accumulateImages, Texture* texture)
 {
     VkWriteDescriptorSetAccelerationStructureKHR accelerationStructureInfo = {
         .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -1181,8 +1203,10 @@ bool raytracer_render(VkCommandBuffer commandBuffer, VkImage accumulationImage, 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout,
         1, 1, &descriptorSets.items[frameIndex], 0, 0);
     
-    if(camera_moved())
+    if(camera_moved() || clearAccumulation)
     {
+        clearAccumulation = false;
+        
         pushConstants.frameCount = 1;
 
         VkClearColorValue clearColor = {
@@ -1211,8 +1235,16 @@ bool raytracer_render(VkCommandBuffer commandBuffer, VkImage accumulationImage, 
     return true;
 }
 
+void raytracing_clear_accumulation()
+{
+    clearAccumulation = true;
+}
+
 void raytracing_destroy()
 {
+    for(size_t i = 0; i < aabbBuffers.count; ++i)
+        DeleteBuffer(aabbBuffers.items[i]);
+    
     for(size_t i = 0; i < volumes.count; ++i)
         DeleteImage(volumes.items[i]);
 

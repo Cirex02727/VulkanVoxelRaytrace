@@ -26,14 +26,13 @@ struct Palette {
 
 const Palette palette[] = Palette[] (
     Palette (vec3(1.0, 0.0, 1.0), 0),
+    Palette (vec3(0.9, 0.9, 0.9), 0),
     Palette (vec3(0.8, 0.3, 0.2), 0),
     Palette (vec3(0.2, 0.8, 0.3), 0),
     Palette (vec3(0.3, 0.2, 0.8), 0),
-    Palette (vec3(0.8, 0.3, 0.8), 0),
-    Palette (vec3(0.8, 0.8, 0.3), 0),
-    Palette (vec3(0.3, 0.8, 0.8), 0),
-
-    Palette (vec3(0.8, 0.3, 0.2), 1)
+    Palette (vec3(1.0, 0.0, 0.0), 1),
+    Palette (vec3(0.0, 1.0, 0.0), 2),
+    Palette (vec3(0.0, 0.0, 1.0), 3)
 );
 
 void main()
@@ -46,34 +45,34 @@ void main()
 
     vec3 position = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT + hitNormal * EPSILON;
 
-    vec3 lightDir = normalize(vec3(-1.0, -0.5, -2.0));
+    // vec3 lightDir = normalize(vec3(-1.0, -0.5, -2.0));
 
     // bool debug = all(lessThanEqual(gl_LaunchIDEXT.xy, vec2(0.0)));
 
-    float attenuation = dot(hitNormal, lightDir);
-    if(attenuation > 0)
-    {
-        uint flags  = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT;
- 
-        isShadowed = true;
-        traceRayEXT(as,       // acceleration structure
-                    flags,    // rayFlags
-                    0xFF,     // cullMask
-                    0,        // sbtRecordOffset
-                    0,        // sbtRecordStride
-                    1,        // missIndex
-                    position, // ray origin
-                    0.001,    // ray min range
-                    lightDir, // ray direction
-                    1000.0,   // ray max range
-                    1         // payload (location = 1)
-        );
-        
-        if(isShadowed)
-            attenuation = 0.1;
-    }
-    else
-        attenuation = 0.01;
+    float attenuation = 1.0; // dot(hitNormal, lightDir);
+    // if(attenuation > 0)
+    // {
+    //     uint flags  = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT;
+ // 
+    //     isShadowed = true;
+    //     traceRayEXT(as,       // acceleration structure
+    //                 flags,    // rayFlags
+    //                 0xFF,     // cullMask
+    //                 0,        // sbtRecordOffset
+    //                 0,        // sbtRecordStride
+    //                 1,        // missIndex
+    //                 position, // ray origin
+    //                 0.001,    // ray min range
+    //                 lightDir, // ray direction
+    //                 1000.0,   // ray max range
+    //                 1         // payload (location = 1)
+    //     );
+    //     
+    //     if(isShadowed)
+    //         attenuation = 0.1;
+    // }
+    // else
+    //     attenuation = 0.01;
 
     // if(debug)
     //     debugPrintfEXT("Start: %v3f | %f\n", hitNormal, attenuation);

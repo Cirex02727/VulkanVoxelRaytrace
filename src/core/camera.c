@@ -9,8 +9,8 @@
 
 static Vec3 globalUp = { 0.0f, 1.0f, 0.0f };
 
-static Vec3 cameraPosition = { 0.654155f, -0.299999f, 0.371549f }, cameraDirection = { 0.0f, 0.0f, 0.0f };
-static float cameraYaw = 53.332420f, cameraPitch = 19.666969f;
+static Vec3 cameraPosition = { 1.463829f, 1.266712f, 0.486529f }, cameraDirection = { 0.0f, 0.0f, 0.0f };
+static float cameraYaw = 56.999176f, cameraPitch = 17.666922f;
 
 static Vec3 cameraFront, cameraRight;
 static Mat4 cameraProjView, cameraUiProj;
@@ -58,6 +58,8 @@ void camera_resize(uint32_t width, uint32_t height)
 
 void camera_update(float dt)
 {
+    // printf("%ff, %ff, %ff, | %ff | %ff\n", cameraPosition.x, cameraPosition.y, cameraPosition.z, cameraYaw, cameraPitch);
+
     float speed = 2.0f * dt, sensitivity = 20.0f * dt;
     if(input_key(GLFW_KEY_LEFT_CONTROL))
         speed *= 3.0f;

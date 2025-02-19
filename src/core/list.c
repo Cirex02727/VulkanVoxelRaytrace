@@ -14,7 +14,10 @@ void list_destroy_(void** items)
 void list_alloc_(void** items, size_t* count, size_t* capacity, size_t typeSize, size_t startCapacity)
 {
     if(*capacity >= startCapacity)
+    {
+        *count = 0;
         return;
+    }
     else if(*capacity != 0)
         free(*items);
     

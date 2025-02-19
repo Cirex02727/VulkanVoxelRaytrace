@@ -1378,47 +1378,72 @@ static bool vulkan_create_raytracing()
     
     char tempStr[1024];
     Timer t;
-
-    const uint32_t width = 32, height = 32, depth = 32;
-
+    
     {
         timer_start(&t);
 
         raytracing_add_material(&(Material) { .emission = { 0.0f, 0.0f, 0.0f, 0.0f } });
-        raytracing_add_material(&(Material) { .emission = { 1.0f, 0.0f, 0.0f, 5.0f } });
-
-        Texture volume = {
-            .mipLevels = 1,
-        };
+        raytracing_add_material(&(Material) { .emission = { 1.0f, 0.0f, 0.0f, 1.0f } });
+        raytracing_add_material(&(Material) { .emission = { 0.0f, 1.0f, 0.0f, 1.0f } });
+        raytracing_add_material(&(Material) { .emission = { 0.0f, 0.0f, 1.0f, 1.0f } });
 
         {
-            AABB aabb = {
-                .min = { 0.0f, 0.0f, 0.0 },
-                .max = { width, height, depth },
-            };
-            
-            CHECK(vulkan_create_data_buffer(commandPool, &aabb, sizeof(AABB),
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, &aabbBuffer.buffer, &aabbBuffer.memory));
+            uint32_t width = 1, height = 32, depth = 32;
 
-            CHECK(vulkan_create_image_3d(width, height, depth, VK_FORMAT_R8_UINT,
-                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &volume.image));
-            CHECK(vulkan_create_image_view_3d(volume.image.image, VK_FORMAT_R8_UINT, VK_IMAGE_ASPECT_COLOR_BIT, &volume.image.view));
+            uint8_t volumeData[width * height * depth];
+            for(uint32_t z = 0; z < depth; ++z)
+                for(uint32_t y = 0; y < height; ++y)
+                    for(uint32_t x = 0; x < width; ++x)
+                        volumeData[x + y * width + z * (width * height)] = 5;
+
+            CHECK(raytracing_add_volume_geometry(commandPool, width, height, depth, volumeData));
+        }
+        {
+            uint32_t width = 1, height = 32, depth = 32;
+
+            uint8_t volumeData[width * height * depth];
+            for(uint32_t z = 0; z < depth; ++z)
+                for(uint32_t y = 0; y < height; ++y)
+                    for(uint32_t x = 0; x < width; ++x)
+                        volumeData[x + y * width + z * (width * height)] = 6;
+
+            CHECK(raytracing_add_volume_geometry(commandPool, width, height, depth, volumeData));
+        }
+        {
+            uint32_t width = 32, height = 1, depth = 32;
+
+            uint8_t volumeData[width * height * depth];
+            for(uint32_t z = 0; z < depth; ++z)
+                for(uint32_t y = 0; y < height; ++y)
+                    for(uint32_t x = 0; x < width; ++x)
+                        volumeData[x + y * width + z * (width * height)] = 7;
+
+            CHECK(raytracing_add_volume_geometry(commandPool, width, height, depth, volumeData));
+        }
+        {
+            uint32_t width = 32, height = 32, depth = 1;
+
+            uint8_t volumeData[width * height * depth];
+            for(uint32_t z = 0; z < depth; ++z)
+                for(uint32_t y = 0; y < height; ++y)
+                    for(uint32_t x = 0; x < width; ++x)
+                        volumeData[x + y * width + z * (width * height)] = 1;
+
+            CHECK(raytracing_add_volume_geometry(commandPool, width, height, depth, volumeData));
+        }
+        {
+            uint32_t width = 8, height = 8, depth = 8;
 
             uint8_t volumeData[width * height * depth];
             for(uint32_t z = 0; z < depth; ++z)
                 for(uint32_t y = 0; y < height; ++y)
                     for(uint32_t x = 0; x < width; ++x)
                     {
-                        int i = x + y * width + z * (width * height);
-
-                        bool border = (x < 10 && y < 10 && z < 10) || (x > width - 10 && y > height - 10 && z > depth - 10);
-                        volumeData[i] = border ? (i == 0 ? 7 : ((i % 6) + 1)) : 0;
+                        uint32_t i = x + y * width + z * (width * height);
+                        volumeData[i] = (i % 3) + 2;
                     }
 
-            CHECK(vulkan_upload_texture_buffer_3d(volumeData, width, height, depth, commandPool, &volume));
-
-            raytracing_add_volume_geometry(aabbBuffer.buffer, sizeof(AABB), volume.image);
+            CHECK(raytracing_add_volume_geometry(commandPool, width, height, depth, volumeData));
         }
 
         raytracing_add_triangle_geometry(vertexBuffer.buffer, indexBuffer.buffer,
@@ -1443,36 +1468,100 @@ static bool vulkan_create_raytracing()
 
     {
         Mat4 transform;
-        Vec3 pos = {0};
-
         VkTransformMatrixKHR outTransform;
 
         size_t instances = 0;
 
         float scale = 0.2f;
-        Vec3 mul = { width * scale * 1.5f, height * scale * 1.5f, depth * scale * 1.5f };
 
-        float size = 10;
-        for(pos.z = 0; pos.z < size; ++pos.z)
-            for(pos.y = 0; pos.y > -size; --pos.y)
-                for(pos.x = 0; pos.x < size; ++pos.x)
-                {
-                    Vec3 p;
-                    vec3_mul(&pos, &mul, &p);
+        {
+            Vec3 p = { 32.0f + 5.0f, 0.0f, 0.0f };
 
-                    mat4_identity(&transform);
-                    mat4_translate(&transform, &p, &transform);
-                    mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
 
-                    mat4_to_vk_transform(&transform, &outTransform);
+            mat4_to_vk_transform(&transform, &outTransform);
 
-                    raytracing_add_volume_instance(0, &outTransform);
-                    ++instances;
-                }
+            raytracing_add_volume_instance(0, &outTransform);
+            ++instances;
+        }
+        {
+            Vec3 p = { 5.0f, 0.0f, 0.0f };
 
-        pos = (Vec3) {0};
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
 
-        size = 1;
+            mat4_to_vk_transform(&transform, &outTransform);
+
+            raytracing_add_volume_instance(1, &outTransform);
+            ++instances;
+        }
+        {
+            Vec3 p = { 5.0f, 0.0f, 0.0f };
+
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
+
+            mat4_to_vk_transform(&transform, &outTransform);
+
+            raytracing_add_volume_instance(2, &outTransform);
+            ++instances;
+        }
+        {
+            Vec3 p = { 5.0f, 32.0f, 0.0f };
+
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
+
+            mat4_to_vk_transform(&transform, &outTransform);
+
+            raytracing_add_volume_instance(2, &outTransform);
+            ++instances;
+        }
+        {
+            Vec3 p = { 5.0f, 0.0f, 32.0f };
+
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
+
+            mat4_to_vk_transform(&transform, &outTransform);
+
+            raytracing_add_volume_instance(3, &outTransform);
+            ++instances;
+        }
+        {
+            Vec3 p = { 5.0f, 0.0f, 0.0f };
+
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
+
+            mat4_to_vk_transform(&transform, &outTransform);
+
+            raytracing_add_volume_instance(3, &outTransform);
+            ++instances;
+        }
+        {
+            Vec3 p = { 12.0f + 5.0f, 12.0f, 16.0f };
+
+            mat4_identity(&transform);
+            mat4_scale(&transform, &(Vec3){ scale, scale, scale });
+            mat4_translate(&transform, &p, &transform);
+
+            mat4_to_vk_transform(&transform, &outTransform);
+
+            raytracing_add_volume_instance(4, &outTransform);
+            ++instances;
+        }
+
+        Vec3 pos;
+
+        float size = 1;
         for(pos.z = 0; pos.z < size; ++pos.z)
             for(pos.y = 0; pos.y > -size; --pos.y)
                 for(pos.x = 0; pos.x < size; ++pos.x)
@@ -1482,7 +1571,7 @@ static bool vulkan_create_raytracing()
                     
                     mat4_to_vk_transform(&transform, &outTransform);
 
-                    raytracing_add_triangle_instance(1, &outTransform);
+                    raytracing_add_triangle_instance(5, &outTransform);
                     ++instances;
                 }
 
@@ -1616,6 +1705,9 @@ static bool vulkan_recreate_swap_chain()
     CHECK(vulkan_create_depth_resources());
     CHECK(vulkan_create_framebuffers());
 
+    CHECK(raytracing_update_descriptor_sets(viewportImages, accumulateViewportImages, &texture));
+    raytracing_clear_accumulation();
+
     return true;
 }
 
@@ -1677,6 +1769,7 @@ static bool vulkan_record_command_buffer(VkCommandBuffer commandBuffer, uint32_t
 
     VKCHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
+    /*
     VkClearValue clearColor[] = {
         [0] = (VkClearValue) {
             .color = {
@@ -1697,6 +1790,7 @@ static bool vulkan_record_command_buffer(VkCommandBuffer commandBuffer, uint32_t
         .clearValueCount   = ARRAYLEN(clearColor),
         .pClearValues      = clearColor,
     };
+    */
 
     // Render Quad
     /*
