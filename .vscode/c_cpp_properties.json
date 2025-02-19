@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/",
+                "${workspaceFolder}/src/",
+                "${workspaceFolder}/dependencies/GLFW/include/",
+                "${workspaceFolder}/vendor/"
+            ],
+            "defines": [ "VKDEBUG", "GLFW_INCLUDE_VULKAN", "_BSD_SOURCE" ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

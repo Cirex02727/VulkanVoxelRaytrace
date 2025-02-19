@@ -1,0 +1,67 @@
+#version 460
+#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+#include "rayShared.shinc"
+
+layout(location = 0) rayPayloadEXT Payload payload;
+
+layout(set = 0, binding = 0) uniform UniformBufferObject
+{
+    mat4 view;
+    mat4 proj;
+
+    mat4 invView;
+    mat4 invProj;
+} ubo;
+
+layout(set = 1, binding = 0) uniform accelerationStructureEXT as;
+
+layout(set = 1, binding = 1, rgba32f) uniform image2D outImage;
+
+void main()
+{
+    vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    vec2 uv = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    vec2 d = uv * 2.0 - 1.0;
+
+    vec3 ro     = (ubo.invView * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vec4 target = ubo.invProj * vec4(d, 1.0, 1.0);
+    vec3 rd     = (ubo.invView * vec4(normalize(target.xyz / target.w), 0.0)).xyz;
+
+    vec4 color = vec4(0.0);
+    
+    payload.position = vec3(0.0);
+    payload.normal = vec3(0.0);
+    payload.color = vec4(0.0);
+
+    int i = 0;
+    while(i < 1)
+    {
+        traceRayEXT(
+            as,                   // acceleration structure
+            gl_RayFlagsOpaqueEXT, // rayFlags
+            0xff,                 // cullMask
+            0,                    // sbtRecordOffset
+            0,                    // sbtRecordStride
+            0,                    // missIndex
+            ro,                   // ray origin
+            0.001,                // ray min range
+            rd,                   // ray direction
+            1000.0,               // ray max range
+            0                     // payload (location = 0)
+        );
+
+        color += payload.color;
+
+        if(all(equal(payload.normal, vec3(0.0))))
+            break;
+
+        ro = payload.position;
+        rd = reflect(rd, payload.normal);
+
+        ++i;
+    }
+    
+    imageStore(outImage, ivec2(gl_LaunchIDEXT.xy), color);
+}

@@ -1,0 +1,92 @@
+#version 460
+#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : require
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference2 : require
+
+// #extension GL_EXT_debug_printf : require
+
+hitAttributeEXT vec3 hitNormal;
+
+layout(set = 1, binding = 4, r8ui) uniform uimage3D volumes[];
+
+#define EPSILON 5e-4
+
+bool aabbIntersect(in vec3 rayO, in vec3 rayInvD, in vec3 aabbMax, out float t)
+{
+    vec3  tbot   = rayInvD * -rayO;
+    vec3  ttop   = rayInvD * (aabbMax - rayO);
+    vec3  tmin   = min(ttop, tbot);
+    vec3  tmax   = max(ttop, tbot);
+    float t0     = max(tmin.x, max(tmin.y, tmin.z));
+    float t1     = min(tmax.x, min(tmax.y, tmax.z));
+
+    t = t1 > max(t0, 0.0) ? max(t0, 0.0) : -1.0;
+    return t > -1 && t <= gl_RayTmaxEXT;
+}
+
+void main()
+{
+    vec3 rayO = gl_WorldToObjectEXT * vec4(gl_WorldRayOriginEXT, 1.0);
+    vec3 rayD = gl_WorldToObjectEXT * vec4(gl_WorldRayDirectionEXT, 0.0);
+    vec3 rayInvD = 1.0 / rayD;
+
+    vec3 size = imageSize(volumes[gl_InstanceCustomIndexEXT]);
+
+    // bool debug = all(lessThanEqual(gl_LaunchIDEXT.xy, vec2(0.0)));
+
+    float t;
+    if(!aabbIntersect(rayO, rayInvD, size, t))
+    {
+        reportIntersectionEXT(0.0, 0);
+        return;
+    }
+
+    vec3 pos = rayO + rayD * t;
+	ivec3 voxel = ivec3(pos);
+
+	vec3 s = sign(rayD);
+
+    vec3 d = -abs(voxel + vec3(0.5) - pos);
+    vec3 norm = step(d.xyz, d.yzx) * step(d.xyz, d.zxy) * s;
+
+    // if(debug)
+    //     debugPrintfEXT("Pre: %v3f | %v3d | %v3f | %f | %v3f\n", pos, voxel, d, t, norm);
+    
+    t = max(t + EPSILON, 0.0);
+
+    pos = rayO + rayD * t;
+    voxel = ivec3(pos);
+    
+	vec3 halfDis = s * 0.5 + (0.5 - rayO);
+	vec3 dis = (voxel + halfDis) * rayInvD;
+    
+    // if(debug)
+    //     debugPrintfEXT("Start: %v3f | %v3d | %f | %v3f\n", pos, voxel, t, norm);
+    
+    int i = 0;
+	while(i < 500 && all(greaterThanEqual(voxel, vec3(0.0))) && all(lessThan(voxel, size)) && t < gl_RayTmaxEXT)
+	{
+		uint data = imageLoad(volumes[gl_InstanceCustomIndexEXT], voxel).r;
+		if(data != 0u)
+        {
+            hitNormal = norm;
+            reportIntersectionEXT(max(t, 0.01), data);
+            return;
+        }
+        
+		norm = step(dis.xyz, dis.yzx) * step(dis.xyz, dis.zxy) * s;
+		voxel += ivec3(norm);
+        t = min(dis.z, min(dis.x, dis.y));
+        dis += norm * rayInvD;
+
+        // if(debug)
+        //     debugPrintfEXT("Start: %v3d | %f\n", voxel, t);
+        
+        ++i;
+	}
+    
+    reportIntersectionEXT(0.0, 0);
+}

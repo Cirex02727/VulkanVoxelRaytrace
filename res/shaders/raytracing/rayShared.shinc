@@ -1,0 +1,6 @@
+
+struct Payload {
+    vec3 position;
+    vec3 normal;
+    vec4 color;
+};
