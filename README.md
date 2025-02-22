@@ -8,5 +8,6 @@ An advanced vulkan voxel engine with the raytracing pipeline
 How to run the code
 
 ```bash
+cc -o builder builder.c
 ./builder run
 ```
