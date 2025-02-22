@@ -1,6 +1,6 @@
 #include "texture.h"
 
-#include "stb_image.h"
+#include <stb_image.h>
 
 #include <string.h>
 #include <math.h>

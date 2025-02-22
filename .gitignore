@@ -2,6 +2,9 @@ objs/
 
 *.o
 *.spv
+*.cache
 
 main
 builder
+
+.vscode/

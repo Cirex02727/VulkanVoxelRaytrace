@@ -4,14 +4,9 @@
 
 #include "rayShared.shinc"
 
-layout(location = 0) rayPayloadInEXT Payload payload;
+layout(location = 0) rayPayloadInEXT vec3 payload;
 
 void main()
 {
-    payload.position = vec3(0.0);
-    payload.normal = vec3(0.0);
-    
-    payload.color = vec4(vec3(0.18), 0.0);
-
-    payload.material = 0;
+    payload = vec3(0.18);
 }

@@ -42,10 +42,6 @@ typedef struct {
     Vec2 padding;
 } AABB;
 
-typedef struct {
-    Vec4 emission;
-} Material;
-
 LIST_DEFINE(AABB, AABBs);
 LIST_DEFINE(VkDescriptorImageInfo, DescriptorImageInfos);
 

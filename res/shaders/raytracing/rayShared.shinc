@@ -4,19 +4,11 @@
 struct Payload {
     vec3 position;
     vec3 normal;
-
-    vec4 color;
-
-    uint material;
+    
+    vec3 albedo;
 };
 
 struct GeometryData {
     uint64_t vertexAddress;
     uint64_t indexAddress;
-
-    uint material;
-};
-
-struct Material {
-    vec4 emission;
 };
